@@ -5,6 +5,15 @@ const fs = require('fs');
 const http = require('http');
 const WebSocket = require('ws');
 
+const nodemailer = require('nodemailer');
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER || 'sebads128@gmail.com',
+    pass: process.env.EMAIL_PASS,
+  },
+});
+
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
@@ -89,113 +98,55 @@ app.post('/upload', upload.single('audio'), (req, res) => {
 // -------------------------------------------------------------
 // ENDPOINT 2: Recepción de Reportes (Registra foto y datos)
 // -------------------------------------------------------------
-app.post('/report', upload.single('photo'), (req, res) => {
+app.post('/report', upload.single('photo'), async (req, res) => {
   try {
     const { author, dateTime, description } = req.body;
     const photoFile = req.file;
 
-    console.log(`🚨 NUEVO REPORTE EN TRÁMITE:`);
-    console.log(`- Emisor: ${author}`);
-    console.log(`- Fecha: ${dateTime}`);
-    console.log(`- Detalle: ${description}`);
-    if (photoFile) console.log(`- Evidencia recibida: ${photoFile.filename}`);
+    console.log("🚨 NUEVO REPORTE EN TRÁMITE:");
+    console.log("- Emisor:", author);
+    console.log("- Fecha:", dateTime);
+    console.log("- Detalle:", description);
+    if (photoFile) console.log("- Evidencia recibida:", photoFile.filename);
+
+    const mailOptions = {
+      from: "\x22Colectivos La Punta - Alertas\x22 <" + (process.env.EMAIL_USER || 'sebads128@gmail.com') + ">",
+      to: 'sebads128@gmail.com',
+      subject: `🚨 Reporte de Terreno - ${author || "Chofer"} (${dateTime || "Ahora"})`,
+      html: `
+        <div style="font-family: Arial, sans-serif; background-color: #0c0d0e; color: #ffffff; padding: 20px; border-radius: 8px;">
+          <h2 style="color: #FACC15; border-bottom: 2px solid #FACC15; padding-bottom: 8px;">
+            🚕 Nuevo Reporte de Incidencia en Terreno
+          </h2>
+          <p><strong>Emisor / Móvil:</strong> ${author || "No especificado"}</p>
+          <p><strong>Fecha y Hora:</strong> ${dateTime || "No especificada"}</p>
+          <p><strong>Detalle de la novedad:</strong></p>
+          <blockquote style="background-color: #16181a; border-left: 4px solid #FACC15; padding: 10px 14px; margin: 10px 0;">
+            ${description || "Sin detalle"}
+          </blockquote>
+          ${photoFile ? "<p><em>📸 Se adjuntó una fotografía de evidencia.</em></p>" : "<p><em>Sin archivo fotográfico adjunto.</em></p>"}
+        </div>
+      `,
+      attachments: photoFile ? [
+        {
+          filename: photoFile.originalname || photoFile.filename,
+          path: photoFile.path,
+        }
+      ] : [],
+    };
+
+    if (process.env.EMAIL_PASS) {
+      await transporter.sendMail(mailOptions);
+      console.log("✅ Correo despachado a sebads128@gmail.com");
+    } else {
+      console.log("⚠️ Correo omitido: EMAIL_PASS no está configurada.");
+    }
 
     return res.status(200).json({ success: true, message: 'Reporte procesado exitosamente' });
-
   } catch (error) {
-    console.error('Error en /report:', error);
+    console.error("Error en /report:", error);
     return res.status(500).json({ success: false, error: 'Error al procesar reporte' });
   }
-});
-
-app.get('/', (req, res) => {
-  res.send('Servidor Walkie-Talkie Secoll Communications en línea 🟢');
-});
-
-// -------------------------------------------------------------
-// GESTIÓN DE WEBSOCKETS Y PRESENCIA REAL DE USUARIOS
-// -------------------------------------------------------------
-
-// Mapa para rastrear los datos de cada cliente conectado
-const clientsMap = new Map();
-
-function transmitirListaUsuarios(canalActual) {
-  const usuariosEnCanal = [];
-  
-  clientsMap.forEach((data, clientWs) => {
-    if (clientWs.readyState === WebSocket.OPEN && data.canal === canalActual && data.nombre) {
-      usuariosEnCanal.push({
-        id: data.id,
-        nombre: data.nombre,
-        canal: data.canal
-      });
-    }
-  });
-
-  const payload = JSON.stringify({
-    type: 'lista_usuarios',
-    tipo: 'lista_usuarios',
-    canal: canalActual,
-    usuarios: usuariosEnCanal
-  });
-
-  clientsMap.forEach((data, clientWs) => {
-    if (clientWs.readyState === WebSocket.OPEN && data.canal === canalActual) {
-      clientWs.send(payload);
-    }
-  });
-}
-
-wss.on('connection', (ws) => {
-  console.log('Cliente conectado por WebSocket 🟢');
-  
-  clientsMap.set(ws, { id: Date.now().toString(), nombre: 'Guardia', canal: 'General' });
-
-  ws.on('message', (message) => {
-    try {
-      const data = JSON.parse(message);
-
-      // 1. REGISTRO O CAMBIO DE CANAL
-      if (data.type === 'join_channel' || data.emisor || data.canal || data.sala) {
-        const clientInfo = clientsMap.get(ws) || {};
-        const canalAnterior = clientInfo.canal;
-        
-        clientInfo.nombre = data.emisor || clientInfo.nombre;
-        clientInfo.canal = data.sala || data.canal || data.room || 'General';
-        
-        clientsMap.set(ws, clientInfo);
-
-        transmitirListaUsuarios(clientInfo.canal);
-        if (canalAnterior && canalAnterior !== clientInfo.canal) {
-          transmitirListaUsuarios(canalAnterior);
-        }
-      }
-
-      // 2. REENVIAR MENSAJES Y CHATS
-      wss.clients.forEach((client) => {
-        if (client.readyState === WebSocket.OPEN) {
-          client.send(JSON.stringify(data));
-        }
-      });
-
-    } catch (e) {
-      wss.clients.forEach((client) => {
-        if (client.readyState === WebSocket.OPEN) {
-          client.send(message.toString());
-        }
-      });
-    }
-  });
-
-  ws.on('close', () => {
-    console.log('Cliente desconectado de WebSocket 🔴');
-    const clientInfo = clientsMap.get(ws);
-    clientsMap.delete(ws);
-
-    if (clientInfo && clientInfo.canal) {
-      transmitirListaUsuarios(clientInfo.canal);
-    }
-  });
 });
 
 // Iniciar el servidor
