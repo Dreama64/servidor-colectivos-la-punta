@@ -8,15 +8,16 @@ const WebSocket = require('ws');
 const nodemailer = require('nodemailer');
 const transporter = nodemailer.createTransport({
   host: 'smtp.gmail.com',
-  port: 465,
-  secure: true,
+  port: 587,
+  secure: false, // TLS con STARTTLS
   auth: {
     user: process.env.EMAIL_USER || 'sebads128@gmail.com',
     pass: process.env.EMAIL_PASS,
   },
+  tls: {
+    rejectUnauthorized: false
+  },
   connectionTimeout: 10000,
-  greetingTimeout: 10000,
-  socketTimeout: 15000,
 });
 
 const app = express();
