@@ -5,20 +5,8 @@ const fs = require('fs');
 const http = require('http');
 const WebSocket = require('ws');
 
-const nodemailer = require('nodemailer');
-const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 587,
-  secure: false, // TLS con STARTTLS
-  auth: {
-    user: process.env.EMAIL_USER || 'sebads128@gmail.com',
-    pass: process.env.EMAIL_PASS,
-  },
-  tls: {
-    rejectUnauthorized: false
-  },
-  connectionTimeout: 10000,
-});
+const { Resend } = require("resend");
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 const app = express();
 const server = http.createServer(app);
@@ -141,11 +129,22 @@ app.post('/report', upload.single('photo'), async (req, res) => {
       ] : [],
     };
 
-    if (process.env.EMAIL_PASS) {
-      await transporter.sendMail(mailOptions);
-      console.log("✅ Correo despachado a sebads128@gmail.com");
+    if (process.env.RESEND_API_KEY) {
+      const attachments = photoFile ? [{
+        filename: photoFile.originalname || photoFile.filename,
+        content: fs.readFileSync(photoFile.path),
+      }] : [];
+
+      await resend.emails.send({
+        from: "Colectivos La Punta <onboarding@resend.dev>",
+        to: "sebads128@gmail.com",
+        subject: `🚨 Reporte de Terreno - ${author || "Chofer"} (${dateTime || "Ahora"})`,
+        html: mailOptions.html,
+        attachments: attachments,
+      });
+      console.log("✅ Correo despachado vía HTTPS a sebads128@gmail.com");
     } else {
-      console.log("⚠️ Correo omitido: EMAIL_PASS no está configurada.");
+      console.log("⚠️ Correo omitido: RESEND_API_KEY no configurada.");
     }
 
     return res.status(200).json({ success: true, message: 'Reporte procesado exitosamente' });
