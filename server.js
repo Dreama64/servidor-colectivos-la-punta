@@ -87,6 +87,24 @@ wss.on('connection', (socket) => {
         return;
       }
 
+      // El usuario sale del canal pero mantiene abierto el WebSocket
+      if (data.type === 'leave_channel') {
+        const datos = clientesConectados.get(socket);
+        const salaAnterior = datos?.sala;
+
+        clientesConectados.set(socket, {
+          nombre: datos?.nombre || String(data.emisor || '').trim(),
+          sala: null
+        });
+
+        if (salaAnterior) {
+          enviarListaUsuarios(salaAnterior);
+        }
+
+        console.log('Usuario salio del canal:', datos?.nombre || data.emisor);
+        return;
+      }
+
       // Mensajes de chat
       if (
         data.type === 'nuevo_mensaje_texto' ||
