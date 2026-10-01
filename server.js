@@ -11,7 +11,158 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
+// Presencia de usuarios y chat en tiempo real
 
+const clientesConectados = new Map();
+
+function enviarListaUsuarios(sala) {
+  const usuarios = [];
+
+  clientesConectados.forEach((datos, socket) => {
+    if (
+      socket.readyState === WebSocket.OPEN &&
+      datos.sala === sala &&
+      datos.nombre
+    ) {
+      usuarios.push({ nombre: datos.nombre });
+    }
+  });
+
+  const mensaje = JSON.stringify({
+    type: 'lista_usuarios',
+    sala,
+    usuarios
+  });
+
+  clientesConectados.forEach((datos, socket) => {
+    if (
+      socket.readyState === WebSocket.OPEN &&
+      datos.sala === sala
+    ) {
+      socket.send(mensaje);
+    }
+  });
+}
+
+wss.on('connection', (socket) => {
+  clientesConectados.set(socket, {
+    nombre: null,
+    sala: 'General'
+  });
+
+  console.log('Cliente conectado por WebSocket');
+
+  socket.on('message', (buffer) => {
+    try {
+      const data = JSON.parse(buffer.toString());
+
+      // El usuario entra o cambia de canal
+      if (data.type === 'join_channel') {
+        const anterior = clientesConectados.get(socket);
+        const salaAnterior = anterior?.sala;
+
+        const nombre = String(data.emisor || '').trim();
+
+        const sala = String(
+          data.sala ||
+          data.canal ||
+          data.room ||
+          'General'
+        ).trim();
+
+        if (!nombre) return;
+
+        clientesConectados.set(socket, {
+          nombre,
+          sala
+        });
+
+        if (salaAnterior && salaAnterior !== sala) {
+          enviarListaUsuarios(salaAnterior);
+        }
+
+        enviarListaUsuarios(sala);
+
+        console.log('Usuario conectado:', nombre, 'Canal:', sala);
+        return;
+      }
+
+      // Mensajes de chat
+      if (
+        data.type === 'nuevo_mensaje_texto' ||
+        data.tipo === 'nuevo_mensaje_texto'
+      ) {
+        const datos = clientesConectados.get(socket);
+
+        const sala = String(
+          data.sala ||
+          data.canal ||
+          data.room ||
+          datos?.sala ||
+          'General'
+        ).trim();
+
+        const contenido = String(
+          data.texto ||
+          data.mensaje ||
+          ''
+        ).trim();
+
+        if (!contenido) return;
+
+        const mensaje = JSON.stringify({
+          type: 'nuevo_mensaje_texto',
+          tipo: 'nuevo_mensaje_texto',
+          sala,
+          canal: sala,
+          room: sala,
+          emisor: data.emisor || datos?.nombre || 'Compañero',
+          texto: contenido,
+          mensaje: contenido,
+          timestamp: data.timestamp || new Date().toISOString(),
+          id: data.id || Date.now().toString()
+        });
+
+        clientesConectados.forEach((info, cliente) => {
+          if (
+            cliente !== socket &&
+            cliente.readyState === WebSocket.OPEN &&
+            info.sala === sala
+          ) {
+            cliente.send(mensaje);
+          }
+        });
+
+        console.log('Mensaje enviado en:', sala);
+      }
+
+    } catch (error) {
+      console.error(
+        'Mensaje WebSocket invalido:',
+        error.message
+      );
+    }
+  });
+
+  socket.on('close', () => {
+    const datos = clientesConectados.get(socket);
+
+    clientesConectados.delete(socket);
+
+    if (datos?.sala) {
+      enviarListaUsuarios(datos.sala);
+    }
+
+    console.log(
+      'Cliente desconectado:',
+      datos?.nombre || 'sin identificar'
+    );
+  });
+
+  socket.on('error', (error) => {
+    console.error('Error WebSocket:', error.message);
+  });
+});
 const PORT = process.env.PORT || 3000;
 const BASE_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 
