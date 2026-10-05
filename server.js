@@ -245,7 +245,14 @@ app.post('/upload', upload.single('audio'), (req, res) => {
     });
 
     wss.clients.forEach((client) => {
-      if (client.readyState === WebSocket.OPEN) {
+      const datosCliente = clientesConectados.get(client);
+
+      if (
+        client.readyState === WebSocket.OPEN &&
+        datosCliente &&
+        datosCliente.nombre &&
+        datosCliente.sala === sala
+      ) {
         client.send(mensajeNotificacion);
       }
     });
