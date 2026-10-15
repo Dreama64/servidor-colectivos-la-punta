@@ -53,7 +53,7 @@ wss.on('connection', (socket) => {
   socket.on('pong', heartbeat);
   clientesConectados.set(socket, {
     nombre: null,
-    sala: 'General'
+    sala: null
   });
 
   console.log('Cliente conectado por WebSocket');
