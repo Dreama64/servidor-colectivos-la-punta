@@ -15,6 +15,10 @@ const wss = new WebSocket.Server({ server });
 
 const clientesConectados = new Map();
 
+function heartbeat() {
+  this.isAlive = true;
+}
+
 function enviarListaUsuarios(sala) {
   const usuarios = [];
 
@@ -45,6 +49,8 @@ function enviarListaUsuarios(sala) {
 }
 
 wss.on('connection', (socket) => {
+  socket.isAlive = true;
+  socket.on('pong', heartbeat);
   clientesConectados.set(socket, {
     nombre: null,
     sala: 'General'
@@ -181,6 +187,23 @@ wss.on('connection', (socket) => {
     console.error('Error WebSocket:', error.message);
   });
 });
+
+const heartbeatInterval = setInterval(() => {
+  wss.clients.forEach((socket) => {
+    if (socket.isAlive === false) {
+      socket.terminate();
+      return;
+    }
+
+    socket.isAlive = false;
+    socket.ping();
+  });
+}, 30000);
+
+wss.on('close', () => {
+  clearInterval(heartbeatInterval);
+});
+
 const PORT = process.env.PORT || 3000;
 const BASE_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 
