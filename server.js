@@ -28,7 +28,7 @@ function enviarListaUsuarios(sala) {
       datos.sala === sala &&
       datos.nombre
     ) {
-      usuarios.push({ nombre: datos.nombre });
+      usuarios.push({ nombre: datos.nombre, clienteId: datos.clienteId });
     }
   });
 
@@ -60,6 +60,8 @@ wss.on('connection', (socket) => {
 
   socket.on('message', (buffer) => {
     try {
+      // Una sesion reemplazada no puede volver a registrarse ni emitir chat.
+      if (!clientesConectados.has(socket)) return;
       const data = JSON.parse(buffer.toString());
 
       // El usuario entra o cambia de canal
@@ -78,16 +80,27 @@ wss.on('connection', (socket) => {
 
         if (!nombre) return;
 
-        clientesConectados.set(socket, {
-          nombre,
-          sala
-        });
-
-        if (salaAnterior && salaAnterior !== sala) {
-          enviarListaUsuarios(salaAnterior);
+        // Se reemplaza solo la misma instalacion, nunca por nombre visible.
+        // Los clientes antiguos sin clienteId siguen siendo compatibles.
+        const clienteId = typeof data.clienteId === 'string' && data.clienteId.length <= 128
+          ? data.clienteId.trim() : null;
+        const salasAfectadas = new Set([salaAnterior, sala]);
+        if (clienteId) {
+          clientesConectados.forEach((info, anteriorSocket) => {
+            if (anteriorSocket !== socket && info.clienteId === clienteId) {
+              salasAfectadas.add(info.sala);
+              clientesConectados.delete(anteriorSocket);
+              anteriorSocket.close(4001, 'Sesion reemplazada');
+              const cierre = setTimeout(() => anteriorSocket.terminate(), 1000);
+              cierre.unref();
+            }
+          });
         }
+        clientesConectados.set(socket, { nombre, sala, clienteId });
 
-        enviarListaUsuarios(sala);
+        salasAfectadas.forEach(canal => {
+          if (canal) enviarListaUsuarios(canal);
+        });
 
         console.log('Usuario conectado:', nombre, 'Canal:', sala);
         return;
@@ -99,6 +112,7 @@ wss.on('connection', (socket) => {
         const salaAnterior = datos?.sala;
 
         clientesConectados.set(socket, {
+          ...datos,
           nombre: datos?.nombre || String(data.emisor || '').trim(),
           sala: null
         });
