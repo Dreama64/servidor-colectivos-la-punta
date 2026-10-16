@@ -48,6 +48,20 @@ function enviarListaUsuarios(sala) {
   });
 }
 
+// Snapshot global independiente de lista_usuarios por canal.
+function enviarListaUsuariosGlobal() {
+  const usuarios = [];
+  clientesConectados.forEach((datos, socket) => {
+    if (socket.readyState === WebSocket.OPEN && datos.nombre) {
+      usuarios.push({ nombre: datos.nombre, clienteId: datos.clienteId, sala: datos.sala });
+    }
+  });
+  const mensaje = JSON.stringify({ type: 'lista_usuarios_global', usuarios });
+  clientesConectados.forEach((datos, socket) => {
+    if (socket.readyState === WebSocket.OPEN && datos.nombre) socket.send(mensaje);
+  });
+}
+
 wss.on('connection', (socket) => {
   socket.isAlive = true;
   socket.on('pong', heartbeat);
@@ -65,13 +79,13 @@ wss.on('connection', (socket) => {
       const data = JSON.parse(buffer.toString());
 
       // El usuario entra o cambia de canal
-      if (data.type === 'join_channel') {
+      if (data.type === 'join_channel' || data.type === 'registrar_usuario') {
         const anterior = clientesConectados.get(socket);
         const salaAnterior = anterior?.sala;
 
         const nombre = String(data.emisor || '').trim();
 
-        const sala = String(
+        const sala = data.type === 'registrar_usuario' ? (salaAnterior || null) : String(
           data.sala ||
           data.canal ||
           data.room ||
@@ -84,6 +98,7 @@ wss.on('connection', (socket) => {
         // Los clientes antiguos sin clienteId siguen siendo compatibles.
         const clienteId = typeof data.clienteId === 'string' && data.clienteId.length <= 128
           ? data.clienteId.trim() : null;
+        if (data.type === 'registrar_usuario' && !clienteId) return;
         const salasAfectadas = new Set([salaAnterior, sala]);
         if (clienteId) {
           clientesConectados.forEach((info, anteriorSocket) => {
@@ -102,6 +117,7 @@ wss.on('connection', (socket) => {
           if (canal) enviarListaUsuarios(canal);
         });
 
+        enviarListaUsuariosGlobal();
         console.log('Usuario conectado:', nombre, 'Canal:', sala);
         return;
       }
@@ -121,6 +137,7 @@ wss.on('connection', (socket) => {
           enviarListaUsuarios(salaAnterior);
         }
 
+        enviarListaUsuariosGlobal();
         console.log('Usuario salio del canal:', datos?.nombre || data.emisor);
         return;
       }
@@ -191,6 +208,7 @@ wss.on('connection', (socket) => {
       enviarListaUsuarios(datos.sala);
     }
 
+    if (datos?.nombre) enviarListaUsuariosGlobal();
     console.log(
       'Cliente desconectado:',
       datos?.nombre || 'sin identificar'
